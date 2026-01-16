@@ -1,54 +1,8 @@
 import socket
 import threading
 import sys
-
-class ChatRoom:
-    def __init__(self):
-        """
-        Representa uma sala de chat com dois clientes.
-        """
-        self.client1 = None
-        self.client2 = None
-        self.lock = threading.Lock()
-    
-    def is_full(self):
-        """
-        Verifica se a sala está cheia (2 clientes conectados).
-        """
-        return self.client1 is not None and self.client2 is not None
-    
-    def add_client(self, client_info):
-        """
-        Adiciona um cliente à sala. Retorna True se adicionado, False se sala cheia.
-        """
-        with self.lock:
-            if self.client1 is None:
-                self.client1 = client_info
-                return True
-            elif self.client2 is None:
-                self.client2 = client_info
-                return True
-            return False
-    
-    def get_other_client(self, current_client):
-        """
-        Retorna o outro cliente da sala.
-        """
-        with self.lock:
-            if current_client == self.client1:
-                return self.client2
-            else:
-                return self.client1
-    
-    def remove_client(self, client_info):
-        """
-        Remove um cliente da sala.
-        """
-        with self.lock:
-            if self.client1 == client_info:
-                self.client1 = None
-            elif self.client2 == client_info:
-                self.client2 = None
+import json
+import time
 
 class Server:
     def __init__(self, host='localhost', port=5000):
@@ -58,10 +12,17 @@ class Server:
         self.host = host
         self.port = port
         self.server_socket = None
-        self.waiting_client = None
-        self.waiting_lock = threading.Lock()
-        self.active_rooms = []
-        self.rooms_lock = threading.Lock()
+        self.connected_clients = {}  # {client_id: {'socket': socket, 'address': address, 'name': name}}
+        self.client_lock = threading.Lock()
+        self.client_id_counter = 0
+        
+    def _generate_client_id(self):
+        """
+        Gera um ID único para cada cliente.
+        """
+        with self.client_lock:
+            self.client_id_counter += 1
+            return self.client_id_counter
         
     def start(self):
         """
@@ -93,7 +54,7 @@ class Server:
                     
                     # Cria uma thread para lidar com o cliente
                     client_thread = threading.Thread(
-                        target=self.match_clients,
+                        target=self.handle_client,
                         args=(client_socket, client_address),
                         daemon=True
                     )
@@ -110,126 +71,201 @@ class Server:
         finally:
             self.close()
     
-    def match_clients(self, client_socket, client_address):
+    def handle_client(self, client_socket, client_address):
         """
-        Tenta fazer matching de dois clientes. Se houver um cliente aguardando,
-        cria uma sala de chat. Caso contrário, coloca este cliente em espera.
+        Gerencia a conexão e comunicação com um cliente.
         """
-        client_info = {
-            'socket': client_socket,
-            'address': client_address
-        }
-        
-        with self.waiting_lock:
-            if self.waiting_client is None:
-                # Este é o primeiro cliente, coloca em espera
-                self.waiting_client = client_info
-                print(f"[AGUARDANDO] Cliente {client_address} aguardando parceiro...")
-                
-                try:
-                    # Envia mensagem de espera
-                    message = "[SERVIDOR] Aguardando outro cliente se conectar...\n"
-                    client_socket.sendall(message.encode('utf-8'))
-                except:
-                    pass
-            else:
-                # Há um cliente aguardando, faz o matching
-                other_client = self.waiting_client
-                self.waiting_client = None
-                
-                print(f"[MATCH] Conectando {client_address} com {other_client['address']}")
-                
-                # Cria uma nova sala de chat
-                room = ChatRoom()
-                room.add_client(client_info)
-                room.add_client(other_client)
-                
-                with self.rooms_lock:
-                    self.active_rooms.append(room)
-                
-                # Inicia chat para ambos os clientes
-                thread1 = threading.Thread(
-                    target=self.handle_chat,
-                    args=(room, client_info),
-                    daemon=True
-                )
-                thread2 = threading.Thread(
-                    target=self.handle_chat,
-                    args=(room, other_client),
-                    daemon=True
-                )
-                thread1.start()
-                thread2.start()
-    
-    def handle_chat(self, room, client_info):
-        """
-        Gerencia a comunicação entre dois clientes.
-        """
-        client_socket = client_info['socket']
-        client_address = client_info['address']
+        client_id = None
         
         try:
-            # Envia mensagem de sucesso
-            message = f"[SERVIDOR] Conectado! Você está em chat com {room.get_other_client(client_info)['address']}\n"
-            client_socket.sendall(message.encode('utf-8'))
+            # Recebe o nome do cliente
+            data = client_socket.recv(1024)
+            if not data:
+                return
             
+            client_name = data.decode('utf-8').strip()
+            client_id = self._generate_client_id()
+            
+            # Registra o cliente
+            with self.client_lock:
+                self.connected_clients[client_id] = {
+                    'socket': client_socket,
+                    'address': client_address,
+                    'name': client_name
+                }
+            
+            print(f"[CLIENTE CONECTADO] ID: {client_id}, Nome: {client_name}, Endereço: {client_address}")
+            
+            # Envia confirmação com o ID
+            response = json.dumps({
+                'type': 'connection_confirmed',
+                'client_id': client_id,
+                'message': f'Bem-vindo {client_name}! Seu ID é {client_id}'
+            })
+            client_socket.sendall(response.encode('utf-8'))
+            
+            # Envia lista inicial de clientes online
+            self._send_online_clients_list(client_id)
+            
+            # Notifica outros clientes que um novo cliente conectou
+            self._broadcast_client_joined(client_id)
+            
+            # Loop para receber mensagens
             while True:
-                # Recebe dados do cliente (até 1024 bytes)
                 data = client_socket.recv(1024)
                 
                 if not data:
                     break
                 
-                # Decodifica a mensagem
-                message = data.decode('utf-8').strip()
-                print(f"[{client_address[0]}:{client_address[1]}] {message}")
+                message_str = data.decode('utf-8').strip()
                 
-                # Obtém o outro cliente
-                other_client = room.get_other_client(client_info)
-                
-                if other_client is None:
-                    print(f"[ERRO] Outro cliente desconectou para {client_address}")
-                    break
-                
-                # Envia a mensagem para o outro cliente
                 try:
-                    formatted_message = f"{client_address[0]}:{client_address[1]} -> {message}\n"
-                    other_client['socket'].sendall(formatted_message.encode('utf-8'))
-                except Exception as e:
-                    print(f"[ERRO] Não foi possível enviar mensagem: {e}")
-                    break
+                    message_data = json.loads(message_str)
+                    message_type = message_data.get('type')
+                    
+                    if message_type == 'get_online_clients':
+                        # Cliente solicita lista de clientes online
+                        self._send_online_clients_list(client_id)
+                    
+                    elif message_type == 'send_message':
+                        # Cliente envia mensagem direcionada
+                        target_id = message_data.get('target_id')
+                        content = message_data.get('message')
+                        
+                        self._send_direct_message(client_id, target_id, content)
+                    
+                except json.JSONDecodeError:
+                    print(f"[ERRO] Mensagem inválida de cliente {client_id}")
                     
         except Exception as e:
-            print(f"[ERRO] Erro ao comunicar com {client_address}: {e}")
+            print(f"[ERRO] Erro ao comunicar com cliente {client_id}: {e}")
         finally:
-            self.disconnect_client(room, client_info)
+            self.disconnect_client(client_id)
     
-    def disconnect_client(self, room, client_info):
+    def _send_online_clients_list(self, client_id):
         """
-        Desconecta um cliente e notifica o outro.
+        Envia a lista de clientes online para um cliente específico.
         """
-        client_address = client_info['address']
-        other_client = room.get_other_client(client_info)
-        
-        # Remove cliente da sala
-        room.remove_client(client_info)
-        
-        # Fecha a conexão
         try:
-            client_info['socket'].close()
-        except:
-            pass
+            with self.client_lock:
+                if client_id not in self.connected_clients:
+                    return
+                
+                clients_list = []
+                for cid, info in self.connected_clients.items():
+                    if cid != client_id:  # Não inclui o próprio cliente na lista
+                        clients_list.append({
+                            'id': cid,
+                            'name': info['name']
+                        })
+                
+                response = json.dumps({
+                    'type': 'online_clients',
+                    'clients': clients_list
+                })
+                
+                client_socket = self.connected_clients[client_id]['socket']
+                client_socket.sendall(response.encode('utf-8'))
+        except Exception as e:
+            print(f"[ERRO] Erro ao enviar lista de clientes para {client_id}: {e}")
+    
+    def _send_direct_message(self, sender_id, target_id, message_content):
+        """
+        Envia uma mensagem de um cliente para outro cliente específico.
+        """
+        try:
+            with self.client_lock:
+                if target_id not in self.connected_clients:
+                    # Cliente alvo não existe ou desconectou
+                    if sender_id in self.connected_clients:
+                        response = json.dumps({
+                            'type': 'error',
+                            'message': f'Cliente com ID {target_id} não está online'
+                        })
+                        self.connected_clients[sender_id]['socket'].sendall(response.encode('utf-8'))
+                    return
+                
+                # Prepara a mensagem
+                sender_info = self.connected_clients.get(sender_id)
+                sender_name = sender_info['name'] if sender_info else 'Desconhecido'
+                
+                message = json.dumps({
+                    'type': 'message',
+                    'from_id': sender_id,
+                    'from_name': sender_name,
+                    'message': message_content
+                })
+                
+                # Envia apenas para o cliente alvo
+                self.connected_clients[target_id]['socket'].sendall(message.encode('utf-8'))
+                
+                print(f"[MENSAGEM] {sender_name} (ID: {sender_id}) -> Cliente ID {target_id}: {message_content}")
+                
+        except Exception as e:
+            print(f"[ERRO] Erro ao enviar mensagem direta: {e}")
+    
+    def _broadcast_client_joined(self, new_client_id):
+        """
+        Notifica todos os clientes que um novo cliente conectou.
+        """
+        try:
+            with self.client_lock:
+                new_client_info = self.connected_clients[new_client_id]
+                
+                notification = json.dumps({
+                    'type': 'client_joined',
+                    'client_id': new_client_id,
+                    'client_name': new_client_info['name']
+                })
+                
+                # Envia notificação para todos os clientes
+                for client_id, client_info in self.connected_clients.items():
+                    if client_id != new_client_id:  # Não notifica o próprio cliente
+                        try:
+                            client_info['socket'].sendall(notification.encode('utf-8'))
+                        except:
+                            pass
+        except Exception as e:
+            print(f"[ERRO] Erro ao notificar clientes sobre nova conexão: {e}")
+    
+    def disconnect_client(self, client_id):
+        """
+        Desconecta um cliente e notifica os outros.
+        """
+        if client_id is None:
+            return
         
-        print(f"[DESCONEXÃO] Cliente desconectado: {client_address}")
-        
-        # Notifica o outro cliente
-        if other_client is not None:
-            try:
-                message = "\n[SERVIDOR] Seu parceiro desconectou. Conexão encerrada.\n"
-                other_client['socket'].sendall(message.encode('utf-8'))
-                other_client['socket'].close()
-            except:
-                pass
+        try:
+            with self.client_lock:
+                if client_id in self.connected_clients:
+                    client_info = self.connected_clients[client_id]
+                    client_name = client_info['name']
+                    
+                    # Fecha a conexão
+                    try:
+                        client_info['socket'].close()
+                    except:
+                        pass
+                    
+                    # Remove da lista
+                    del self.connected_clients[client_id]
+                    
+                    print(f"[DESCONEXÃO] Cliente desconectado: ID {client_id}, Nome: {client_name}")
+                    
+                    # Notifica outros clientes
+                    notification = json.dumps({
+                        'type': 'client_left',
+                        'client_id': client_id,
+                        'client_name': client_name
+                    })
+                    
+                    for cid, info in self.connected_clients.items():
+                        try:
+                            info['socket'].sendall(notification.encode('utf-8'))
+                        except:
+                            pass
+        except Exception as e:
+            print(f"[ERRO] Erro ao desconectar cliente {client_id}: {e}")
     
     def close(self):
         """
@@ -237,25 +273,10 @@ class Server:
         """
         print("[SERVIDOR] Fechando conexões...")
         
-        # Fecha todas as salas ativas
-        with self.rooms_lock:
-            for room in self.active_rooms:
-                if room.client1:
-                    try:
-                        room.client1['socket'].close()
-                    except:
-                        pass
-                if room.client2:
-                    try:
-                        room.client2['socket'].close()
-                    except:
-                        pass
-        
-        # Fecha cliente em espera
-        with self.waiting_lock:
-            if self.waiting_client:
+        with self.client_lock:
+            for client_id, client_info in self.connected_clients.items():
                 try:
-                    self.waiting_client['socket'].close()
+                    client_info['socket'].close()
                 except:
                     pass
         

@@ -75,9 +75,9 @@ class Server:
             
             client_id = self._generate_client_id()
             server_sk, server_pk_pem = crypto_utils.generate_ecdh_pair()
-            salt = os.urandom(16)
+            salt = os.urandom(16) 
             
-            transcript = client_pk_pem
+            transcript = client_pk_pem # O transcript vincula o handshake ao cliente correto, evitando replay de mensagens de handshake.
             
             data_to_sign = server_pk_pem + str(client_id).encode() + transcript + salt
             
@@ -112,6 +112,9 @@ class Server:
                 }
             
             print(f"[HANDSHAKE] Sucesso com {client_name} (ID: {client_id})")
+            
+            # Notifica todos os clientes sobre o novo cliente
+            self._broadcast_client_joined(client_id)
             
             while True:
                 len_bytes = client_socket.recv(4)
@@ -199,6 +202,39 @@ class Server:
             
             encrypted_frame = crypto_utils.encrypt_message(key, payload, 0, requestor_id, seq)
             info['socket'].sendall(struct.pack('!I', len(encrypted_frame)) + encrypted_frame)
+
+    def _broadcast_client_joined(self, new_client_id):
+        """
+        Notifica todos os clientes (exceto o novo) sobre a conexão do novo cliente.
+        """
+        try:
+            with self.client_lock:
+                new_client_info = self.connected_clients[new_client_id]
+                
+                # Mensagem de notificação
+                notification = {
+                    'type': 'client_joined',
+                    'client_id': new_client_id,
+                    'client_name': new_client_info['name']
+                }
+                
+                # Envia para todos os clientes existentes
+                for client_id, client_info in self.connected_clients.items():
+                    if client_id != new_client_id:  # Não notifica o próprio cliente
+                        try:
+                            payload = json.dumps(notification).encode('utf-8')
+                            key = client_info['key_s2c']
+                            seq = client_info['seq_send'] + 1
+                            client_info['seq_send'] = seq
+                            
+                            encrypted_frame = crypto_utils.encrypt_message(key, payload, 0, client_id, seq)
+                            client_info['socket'].sendall(struct.pack('!I', len(encrypted_frame)) + encrypted_frame)
+                        except Exception as e:
+                            print(f"[ERRO] Falha ao notificar cliente {client_id}: {e}")
+                
+                print(f"[BROADCAST] Notificação de novo cliente {new_client_id} ({new_client_info['name']}) enviada")
+        except Exception as e:
+            print(f"[ERRO] Erro ao fazer broadcast: {e}")
 
     def disconnect_client(self, client_id):
         if client_id in self.connected_clients:

@@ -43,7 +43,6 @@ def derive_keys(shared_secret, salt):
 # --- AES-GCM ---
 def encrypt_message(key, plaintext_bytes, sender_id, target_id, seq_no):
     """
-    Cifra a mensagem e cria o cabeçalho conforme PDF.
     Header: [Nonce (12B)] + [SenderID (16B)] + [TargetID (16B)] + [SeqNo (8B)]
     """
     aesgcm = AESGCM(key)

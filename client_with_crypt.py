@@ -142,6 +142,8 @@ class Client:
             print("\n[CLIENTES ONLINE]")
             for c in data.get('clients', []):
                 print(f"  ID: {c['id']} - Nome: {c['name']}")
+        elif m_type == 'client_joined':
+            print(f"\n[NOTIFICAÇÃO] {data['client_name']} (ID: {data['client_id']}) conectou!")
         elif m_type == 'error':
             print(f"\n[ERRO SERVIDOR] {data.get('message')}")
 
@@ -206,6 +208,8 @@ class Client:
         
         self._send_raw_frame(encrypted_frame)
 
+
+    #Acredito que as duas funcoes abaixo estão somente para handshake
     def _send_raw_frame(self, data):
         """Envia dados com prefixo de tamanho (4 bytes)."""
         if self.socket:

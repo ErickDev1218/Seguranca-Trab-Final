@@ -4,6 +4,12 @@ Implementação de uma aplicação de mensageria multi-cliente segura, desenvolv
 
 O sistema garante **confidencialidade**, **integridade**, **autenticidade** e **sigilo perfeito (forward secrecy)** utilizando uma arquitetura híbrida de criptografia (RSA + ECDHE + AES-GCM).
 
+## Equipe
+
+- Antonio Erick Freitas Ferreira - 542631
+- João Pedro Soares Matias - 538683k
+- Gustavo Gurgel Medeiros - 539226
+
 ## Características do Sistema
 
 - **Arquitetura Cliente-Servidor Seguro**: O servidor atua como um _trusted relay_, gerenciando conexões e roteando mensagens.

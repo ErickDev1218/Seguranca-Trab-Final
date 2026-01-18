@@ -208,8 +208,6 @@ class Client:
         
         self._send_raw_frame(encrypted_frame)
 
-
-    #Acredito que as duas funcoes abaixo estão somente para handshake
     def _send_raw_frame(self, data):
         """Envia dados com prefixo de tamanho (4 bytes)."""
         if self.socket:

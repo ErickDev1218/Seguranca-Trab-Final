@@ -1,314 +1,170 @@
-# Seguranca-Trab-Final
+# Sistema de Chat Seguro (Trabalho Final - Segurança da Informação)
 
-Repositório do trabalho final de segurança ministrada pelo Prof. Michel na UFC.
+Implementação de uma aplicação de mensageria multi-cliente segura, desenvolvida como trabalho final da disciplina de Segurança da Informação (UFC - Prof. Michel).
 
-## Versões Disponíveis
+O sistema garante **confidencialidade**, **integridade**, **autenticidade** e **sigilo perfeito (forward secrecy)** utilizando uma arquitetura híbrida de criptografia (RSA + ECDHE + AES-GCM).
 
-### 1. Sistema de Chat Básico
-- **`server.py`** e **`client.py`**: Versão básica sem criptografia
-- Comunicação em texto simples
-- Ideal para entender a arquitetura
+## Características do Sistema
 
-### 2. Sistema de Chat Seguro (Recomendado)
-- **`server_with_crypt.py`** e **`client_with_crypt.py`**: Versão com criptografia end-to-end
-- Implementa ECDH + AES-128-GCM para segurança
-- Autenticação RSA do servidor
-- Proteção contra replay attacks com sequência de números
+- **Arquitetura Cliente-Servidor Seguro**: O servidor atua como um _trusted relay_, gerenciando conexões e roteando mensagens.
+- **Criptografia Hop-by-Hop**:
+  - A comunicação Cliente $\leftrightarrow$ Servidor é totalmente criptografada.
+  - O servidor decifra a mensagem de origem e a re-cifra para o destinatário (garantindo validação e log de tráfego seguro).
+- **Protocolo de Handshake Seguro (TLS-like)**:
+  - Troca de chaves efêmeras via **ECDH** (Elliptic Curve Diffie-Hellman).
+  - Autenticação do servidor via assinatura **RSA-2048**.
+  - Derivação de chaves de sessão via **HKDF-SHA256**.
+- **Proteção de Dados**:
+  - **Confidencialidade & Integridade**: Uso de **AES-128-GCM** (Authenticated Encryption).
+  - **Anti-Replay**: Controle rigoroso com números de sequência (`seq_no`) para rejeitar pacotes duplicados ou antigos.
+- **Funcionalidades de Chat**:
+  - Mensagens direcionadas (Unicast) por ID.
+  - Listagem de usuários online segura.
 
-## Sistema de Chat com Mensagens Direcionadas
+## Tecnologias e Dependências
 
-Um servidor de chat que permite múltiplos clientes se conectarem e enviarem mensagens direcionadas por ID.
+O projeto utiliza **Python 3.10+** e o gerenciador de pacotes **uv** para alta performance na resolução de dependências.
 
-### Características
+### Gerenciador de Pacotes: `uv`
 
-- **Servidor Central**: Mantém lista de todos os clientes conectados
-- **ID Único por Cliente**: Cada cliente recebe um ID único ao se conectar
-- **Mensagens Direcionadas**: Mensagens são enviadas apenas para o cliente destinatário
-- **Lista de Clientes Online**: Todos os clientes podem visualizar quem está online
-- **Notificações em Tempo Real**: Clientes são notificados quando:
-  - Um novo cliente se conecta
-  - Um cliente desconecta
-  - Novos clientes entram no chat
-- **Criptografia End-to-End**: Na versão segura, toda comunicação é criptografada
+Optamos pelo uso do [uv](https://github.com/astral-sh/uv) por ser extremamente rápido, escrito em Rust, e substituir o pip/virtualenv com uma gestão de _lockfile_ mais robusta e determinística.
 
-### Como Usar
+### Bibliotecas Principais
 
-#### Opção 1: Versão Básica (Sem Criptografia)
+- **`cryptography`**: Primitivas criptográficas (X.509, Hazmat, RSA, AES-GCM).
+- **`socket` / `threading`**: Gerenciamento de rede e concorrência.
 
-**Iniciar o Servidor:**
-```bash
-python server.py [host] [porta]
-```
+## Instalação e Execução
 
-Exemplo:
-```bash
-python server.py localhost 5000
-```
+### 1. Pré-requisitos
 
-**Conectar um Cliente:**
-```bash
-python client.py [host] [porta]
-```
-
-#### Opção 2: Versão Segura (Com Criptografia) - RECOMENDADA
-
-**Preparação (primeira vez):**
-```bash
-python cryptography_utils/generate_keys.py
-```
-
-**Iniciar o Servidor:**
-```bash
-python server_with_crypt.py [host] [porta]
-```
-
-Exemplo:
-```bash
-python server_with_crypt.py localhost 5000
-```
-
-**Conectar um Cliente:**
-```bash
-python client_with_crypt.py [host] [porta]
-```
+Certifique-se de ter o Python instalado. Recomenda-se instalar o `uv`:
 
 ```bash
-python client.py [host] [porta]
+# Linux/macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Exemplo:
+### 2. Instalar Dependências
+
+Na raiz do projeto, sincronize o ambiente virtual:
+
 ```bash
-python client.py localhost 5000
+uv sync
 ```
 
-Quando conectar, será solicitado que você digite seu nome.
+_Isso criará automaticamente o `.venv` e instalará a biblioteca `cryptography` conforme definido no `pyproject.toml`._
 
-### Comandos do Cliente
+### 3. Geração de Chaves (Setup Inicial)
 
-- `/listar` - Exibe a lista de clientes conectados
-- `/enviar <ID> <mensagem>` - Envia uma mensagem para um cliente específico
-- `/sair` - Desconecta do servidor
+Antes de rodar o servidor pela primeira vez, é necessário gerar o par de chaves RSA do servidor e seu certificado autoassinado.
 
-### Sistema de Notificações em Tempo Real
-
-Quando um novo cliente se conecta ao servidor, todos os clientes conectados recebem uma notificação:
-
-```
-[NOTIFICAÇÃO] Alice (ID: 1) conectou!
+```bash
+uv run cryptography_utils/generate_keys.py
 ```
 
-Isso permite que os clientes saibam imediatamente quando novos usuários entram no chat, sem precisar usar `/listar`.
+_Saída esperada:_ Arquivos `server_private_key.pem` e `server.crt` criados em `cryptography_utils/`.
 
-### Exemplo de Uso
+### 4. Iniciando o Servidor
 
-1. Terminal 1 - Servidor:
+O servidor ficará aguardando conexões e gerenciando a troca de chaves.
+
+```bash
+uv run server.py
+# Opcional: uv run server.py [host] [porta]
 ```
-python server_with_crypt.py localhost 5000
+
+### 5. Iniciando Clientes
+
+Abra novos terminais para simular múltiplos clientes (Alice, Bob, etc.). O cliente precisará do `server.crt` gerado anteriormente para validar a autenticidade do servidor.
+
+```bash
+uv run client.py
+# Opcional: uv run client.py [host] [porta]
+```
+
+## Guia de Uso
+
+Ao conectar, digite seu nome. O sistema realizará automaticamente o handshake criptográfico.
+
+### Comandos Disponíveis
+
+- `/listar`: Solicita ao servidor a lista de usuários online (a resposta vem cifrada).
+- `/enviar <ID> <mensagem>`: Envia uma mensagem cifrada para um destino específico.
+- `/sair`: Encerra a conexão segura e destrói as chaves de sessão locais.
+
+### Exemplo de Fluxo
+
+**Terminal 1 (Servidor):**
+
+```text
 [SERVIDOR] Iniciado em localhost:5000 (Seguro)
+[CONEXÃO] Nova conexão...
+[HANDSHAKE] Sucesso com Alice (ID: 1)
 ```
 
-2. Terminal 2 - Cliente Alice:
-```
-python client_with_crypt.py localhost 5000
+**Terminal 2 (Alice):**
+
+```text
 Digite seu nome: Alice
+[SEGURANÇA] Assinatura do servidor VÁLIDA. Identidade confirmada.
 [CLIENTE] Conectado e Criptografado! Seu ID é 1
->> 
-```
-
-3. Terminal 3 - Cliente Bob (conecta depois):
-```
-python client_with_crypt.py localhost 5000
-Digite seu nome: Bob
-[CLIENTE] Conectado e Criptografado! Seu ID é 2
->> 
-```
-
-**Alice recebe automaticamente:**
-```
-[NOTIFICAÇÃO] Bob (ID: 2) conectou!
->>
-```
-
-4. Terminal 4 - Cliente Charlie (conecta depois):
-```
-python client_with_crypt.py localhost 5000
-Digite seu nome: Charlie
-[CLIENTE] Conectado e Criptografado! Seu ID é 3
->> 
-```
-
-**Alice e Bob recebem automaticamente:**
-```
-[NOTIFICAÇÃO] Charlie (ID: 3) conectou!
->>
-```
-
-5. Alice visualiza clientes online:
-```
 >> /listar
 [CLIENTES ONLINE]
   ID: 2 - Nome: Bob
-  ID: 3 - Nome: Charlie
->>
+>> /enviar 2 Olá, Bob!
 ```
 
-6. Alice envia mensagem criptografada para Bob:
-```
->> /enviar 2 Oi Bob, como vai?
-[ENVIADO] Mensagem enviada para cliente ID 2: Oi Bob, como vai?
->>
-```
+**Terminal 3 (Bob):**
 
-7. Bob recebe a mensagem (criptografada em trânsito):
-```
-[MENSAGEM] De Alice (ID: 1): Oi Bob, como vai?
->>
+```text
+[NOTIFICAÇÃO] Alice (ID: 1) conectou!
+...
+[MENSAGEM] De Alice (ID: 1): Olá, Bob!
 ```
 
-**Note:** Charlie não vê a mensagem entre Alice e Bob - é uma comunicação direcionada e privada.
+## Detalhes da Implementação de Segurança
 
-### Protocolo de Comunicação
+O protocolo implementado segue os requisitos estritos do trabalho:
 
-As mensagens entre cliente e servidor são em formato JSON (opcionalmente criptografadas):
+### 1. Handshake (Estabelecimento de Sessão)
 
-**Cliente enviando mensagem:**
-```json
-{
-  "type": "send_message",
-  "target_id": 2,
-  "message": "Olá!"
-}
-```
+1.  **Cliente Hello**: Envia sua chave pública efêmera ECDH (`pk_C`).
+2.  **Server Hello**: Servidor gera seu par ECDH, assina os parâmetros (`pk_S + client_id + transcript + salt`) com sua **Chave Privada RSA**.
+3.  **Verificação**: Cliente valida a assinatura usando o `server.crt` (Certificado Pinado). Isso previne ataques _Man-in-the-Middle_.
+4.  **Derivação**: Ambos calculam o segredo compartilhado e usam **HKDF** para derivar duas chaves simétricas de 128-bits:
+    - `Key_C2S`: Para cifrar dados do Cliente -> Servidor.
+    - `Key_S2C`: Para cifrar dados do Servidor -> Cliente.
 
-**Servidor enviando mensagem:**
-```json
-{
-  "type": "message",
-  "from_id": 1,
-  "from_name": "Alice",
-  "message": "Olá!"
-}
-```
+### 2. Transporte de Mensagens (AES-GCM)
 
-**Notificação de novo cliente:**
-```json
-{
-  "type": "client_joined",
-  "client_id": 3,
-  "client_name": "Charlie"
-}
-```
+Cada mensagem enviada possui a seguinte estrutura de pacote binário:
+`[Tamanho 4B] [Nonce/IV] [Ciphertext + Tag de Autenticação]`
 
-**Lista de clientes online:**
-```json
-{
-  "type": "online_clients",
-  "clients": [
-    {"id": 1, "name": "Alice"},
-    {"id": 2, "name": "Bob"},
-    {"id": 3, "name": "Charlie"}
-  ]
-}
-```
+- **AES-128-GCM**: Garante que apenas quem tem a chave da sessão pode ler (Confidencialidade) e que a mensagem não foi alterada no caminho (Integridade).
+- **Sigilo Perfeito**: Como as chaves são efêmeras (geradas a cada conexão via ECDH) e nunca salvas em disco, o comprometimento da chave RSA do servidor no futuro não permite decifrar conversas passadas.
 
-## Segurança (Versão com Criptografia)
+### 3. Prevenção de Replay Attack
 
-A versão `*_with_crypt.py` implementa os seguintes mecanismos de segurança:
+O sistema mantém contadores de sequência (`seq_send` e `seq_recv`) para cada cliente.
 
-### 1. **Handshake Seguro (TLS-like)**
-- Cliente e servidor realizam handshake seguro ao conectar
-- Troca de chaves públicas ECDH
-- Autenticação do servidor com RSA-2048
-- Validação de certificado do servidor
+- Se o servidor ou cliente receberem uma mensagem com `seq` menor ou igual ao último recebido, o pacote é descartado imediatamente e um alerta de segurança é gerado:
+  `[ALERTA SEGURANÇA] Pacote duplicado/antigo detectado`.
 
-### 2. **Criptografia End-to-End**
-- **Algoritmo**: AES-128 em modo GCM (Galois/Counter Mode)
-- **Derivação de Chaves**: HKDF-SHA256
-- Chaves diferentes para cada direção (C2S e S2C)
-- Cada sessão tem chaves únicas
-
-### 3. **Proteção contra Replay Attacks**
-- Números de sequência em cada mensagem
-- Rejeição automática de pacotes duplicados ou antigos
-- Detecta: `[ALERTA SEGURANÇA] Pacote duplicado/antigo detectado`
-
-### 4. **Integridade de Mensagens**
-- GCM fornece autenticação de mensagens
-- Detecta manipulação ou corrupção de dados
-- Mensagens inválidas são rejeitadas
-
-### 5. **Geração Segura de Chaves**
-```bash
-python cryptography_utils/generate_keys.py
-```
-
-Gera:
-- Chave privada RSA-2048 (`server_private_key.pem`)
-- Certificado X.509 autossignado (`server.crt`)
-
-## Estrutura de Arquivos
+## Estrutura de Arquivos 📂
 
 ```
 .
-├── server.py                           # Servidor básico (sem criptografia)
-├── client.py                           # Cliente básico (sem criptografia)
-├── server_with_crypt.py               # Servidor com criptografia
-├── client_with_crypt.py               # Cliente com criptografia
+├── server.py                   # Lógica do servidor (Socket + Cripto + Roteamento)
+├── client.py                   # Cliente (Interface + Cripto + Handshake)
 ├── cryptography_utils/
-│   ├── generate_keys.py               # Gera chaves de segurança
-│   ├── utils.py                       # Funções criptográficas
-│   ├── server_private_key.pem         # Chave privada do servidor (gerada)
-│   └── server.crt                     # Certificado do servidor (gerado)
-├── README.md                          # Este arquivo
-├── MUDANCAS.md                        # Histórico de mudanças
-└── GUIA_DE_USO.txt                    # Guia detalhado de uso
+│   ├── generate_keys.py        # Script auxiliar para gerar RSA e X.509
+│   ├── utils.py                # Wrapper das primitivas (AES, ECDH, HKDF)
+│   ├── server.crt              # Certificado público (distribuído aos clientes)
+│   └── server_private_key.pem  # Chave privada (apenas no servidor)
+├── pyproject.toml              # Definição do projeto e dependências (UV)
+└── uv.lock                     # Lockfile para garantir reprodutibilidade
 ```
-
-## Requisitos
-
-- Python 3.8+
-- Bibliotecas:
-  - `cryptography` (para versão segura)
-  - `socket` (built-in)
-  - `threading` (built-in)
-  - `json` (built-in)
-  - `struct` (built-in)
-
-Instale dependências:
-```bash
-pip install cryptography
-```
-
-## Testando o Sistema
-
-### Teste Manual
-```bash
-# Terminal 1 - Servidor
-python3 server_with_crypt.py
-
-# Terminal 2 - Alice
-python3 client_with_crypt.py
-
-# Terminal 3 - Bob (depois de Alice conectar)
-python3 client_with_crypt.py
-
-# Terminal 4 - Charlie (depois de Bob conectar)
-python3 client_with_crypt.py
-```
-
-Observe as notificações de novo cliente em tempo real.
-
-### Observações de Segurança
-
-✅ **O que está protegido:**
-- Confidencialidade das mensagens (AES-128-GCM)
-- Autenticidade do servidor (RSA-2048)
-- Integridade das mensagens (GCM)
-- Privacidade das conversas (direcionadas)
-- Proteção contra replay attacks (sequência)
-
-⚠️ **O que não está protegido (por design):**
-- Identidades dos clientes (IDs são públicos)
-- Existência de conversas (conhecer quem está online)
-- Nomes dos clientes (visíveis para todos)
-- Metadados de tempo/sequência
